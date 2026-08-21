@@ -49,14 +49,14 @@ report the real numbers in Section 2.2, rather than asserting bus-count order.
 
 ## 3. File map
 
-- `config.py.example` :— paths + global settings, copy to `config.py`
-- `feeder_xr_check.py` :— computes average X/R per feeder, run this FIRST
-- `pv_profile.py` :— 1-second cloud-edge irradiance generator
-- `feeder_setup.py` :— loads a feeder, attaches PVSystems + InvControl, configures RegControl/CapControl
-- `cosim_engine.py` :— QSTS loop: steps PV input, solves, logs taps/voltage/curtailment
-- `run_single.py` :— runs ONE (feeder, dead-band, response-time) configuration end-to-end, sanity check
-- `sweep.py` :— (next step, not yet written) Latin hypercube sweep over dead-band × response-time × feeder class
-- `attribution.py` :— (next step) PV- vs load-driven tap decomposition per Bai et al. methodology
+- `config.py.example` :- paths + global settings, copy to `config.py`
+- `feeder_xr_check.py` :- computes average X/R per feeder, run this FIRST
+- `pv_profile.py` :- 1-second cloud-edge irradiance generator
+- `feeder_setup.py` :- loads a feeder, attaches PVSystems + InvControl, configures RegControl/CapControl
+- `cosim_engine.py` :- QSTS loop: steps PV input, solves, logs taps/voltage/curtailment
+- `run_single.py` :- runs ONE (feeder, dead-band, response-time) configuration end-to-end, sanity check
+- `sweep.py` :- (next step, not yet written) Latin hypercube sweep over dead-band × response-time × feeder class
+- `attribution.py` :- (next step) PV- vs load-driven tap decomposition per Bai et al. methodology
 
 ## 4. Suggested order of work
 
