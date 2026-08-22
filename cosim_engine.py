@@ -58,28 +58,9 @@ def get_bus_voltage_pu(bus_name: str) -> float:
 
 
 def pick_monitor_buses(feeder_key: str) -> dict:
-    """
-    Returns {'regulator_adjacent': busname, 'midpoint': busname, 'end_of_feeder': busname}.
-    NOTE: bus names below are placeholders/best-guess for the standard IEEE
-    cases and MUST be verified against the actual compiled feeder -- print
-    dss.Circuit.AllBusNames() once and correct this dict per feeder.
-    """
+    
     guesses = {
-        # NOTE: '650' is IEEE13's SOURCE-side bus (upstream of the substation
-        # transformer) -- it sits essentially fixed at ~1.000 pu regardless of
-        # feeder conditions, since it's what the RegControl is correcting
-        # FROM, not what it senses. 'rg60' is the downstream bus (secondary
-        # of the substation transformer / regulator output) that actually
-        # shows the voltage the RegControl reacts to. Confirmed via a real
-        # run: v_pu at '650' had a range of ~2e-5 pu across 10 simulated
-        # hours (i.e. flat), while 'rg60' should show real regulation activity.
         "ieee13": {"regulator_adjacent": "rg60", "midpoint": "632", "end_of_feeder": "680"},
-        # 'regulator_adjacent' now uses '814r' -- the actual regulated
-        # (downstream) bus of RegControl creg1a, confirmed via
-        # dss.RegControls.Transformer()/TapWinding() diagnostic. IEEE34 has
-        # TWO regulator banks (creg1x near 814, creg2x near 852); '814r' is
-        # the one closer to the substation. '800' was the source-side bus,
-        # same class of bug as IEEE13's '650'.
         "ieee34": {"regulator_adjacent": "814r", "midpoint": "816", "end_of_feeder": "890"},
         "ieee123": {"regulator_adjacent": "150", "midpoint": "60", "end_of_feeder": "610"},
     }
@@ -89,22 +70,6 @@ def pick_monitor_buses(feeder_key: str) -> dict:
 def run_qsts(context: dict, t_hours: np.ndarray, pv_pu: np.ndarray,
              qu_deadband_pct: float, dt_s: float = 1.0,
              warmup_seconds: float = 300.0) -> dict:
-    """
-    Runs the QSTS loop over the provided PV profile and returns a results dict
-    with a per-step log DataFrame and summary metrics.
-
-    warmup_seconds: when PV/InvControl is first added to a feeder, the
-    RegControl's starting tap position is often no longer optimal, so it can
-    take several rapid tap operations right at t=0 to reach a new steady
-    state (e.g. IEEE34 showed 18 taps in the first 60 SIMULATED seconds --
-    physically impossible under a 45s delay timer if this were sustained
-    hunting, so it's a settling transient, not the phenomenon under study).
-    These warm-up steps are run and logged (so plots still show the full
-    trace) but EXCLUDED from tap/curtailment totals via warmup_steps below.
-    Default 300s (5 min) is a starting point -- inspect the log's
-    tap_ops_this_step column and increase this if taps are still clustered
-    at the very start of your real (non-warmup) window.
-    """
     pv_names = context["pv_names"]
     reg_names = context["regcontrol_names"]
     feeder_key = context["feeder_key"]
@@ -172,6 +137,14 @@ def run_qsts(context: dict, t_hours: np.ndarray, pv_pu: np.ndarray,
 
     log_df = pd.DataFrame.from_records(records)
     sim_hours_excl_warmup = float(t_hours[-1] - t_hours[0]) - (warmup_steps * dt_s / 3600.0)
+    metric_log = log_df[~log_df["in_warmup"]] if "in_warmup" in log_df.columns else log_df
+    v_cols = [c for c in log_df.columns if c.startswith("v_pu_")]
+    ripple_by_bus = {}
+    for c in v_cols:
+        col = metric_log[c].dropna()
+        if len(col) > 0:
+            ripple_by_bus[c] = float(col.max() - col.min())
+    voltage_ripple_pu = max(ripple_by_bus.values()) if ripple_by_bus else float("nan")
 
     return {
         "log": log_df,
@@ -180,4 +153,6 @@ def run_qsts(context: dict, t_hours: np.ndarray, pv_pu: np.ndarray,
         "tap_ops_per_regcontrol": tap_tracker.tap_op_count if tap_tracker else {},
         "curtailment_mvarh": curtailment_mvarh,
         "sim_hours": sim_hours_excl_warmup,
+        "voltage_ripple_pu": voltage_ripple_pu,
+        "voltage_ripple_by_bus_pu": ripple_by_bus,
     }
