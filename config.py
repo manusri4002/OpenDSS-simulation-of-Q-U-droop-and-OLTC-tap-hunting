@@ -1,4 +1,3 @@
-# Paths to IEEE test feeder master files 
 import os
 
 FEEDER_PATHS = {
@@ -13,7 +12,7 @@ OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "outputs")
 #Simulation timing
 SIM_START_HOUR = 8.0       # start of simulated window (hours, 0-24)
 SIM_END_HOUR = 18.0        # end of simulated window
-TIMESTEP_SECONDS = 1        # QSTS resolution; must be 1s per paper Sec 2.2 (sub-minute dynamics)
+TIMESTEP_SECONDS = 1       # QSTS resolution; must be 1s per paper Sec 2.2 (sub-minute dynamics)
 
 #Baseline (default / untuned) parameters used unless swept 
 BASELINE = {
