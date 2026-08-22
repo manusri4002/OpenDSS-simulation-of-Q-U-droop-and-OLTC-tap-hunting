@@ -16,17 +16,13 @@ RESULT_COLUMNS = [
     "feeder", "qu_deadband_pct", "qu_response_tau_s",
     "oltc_deadband_pct", "oltc_delay_s",
     "total_tap_ops", "warmup_tap_ops", "taps_per_day",
-    "curtailment_mvarh", "sim_hours",
+    "curtailment_mvarh", "voltage_ripple_pu", "sim_hours",
     "tap_ops_reg1", "tap_ops_reg2", "tap_ops_reg3",  # populated best-effort; see note in run_one_scenario
     "wall_seconds", "seed",
 ]
 
 
 def build_scenario_list(feeders, grids):
-    """
-    Returns a list of scenario dicts to run, deduplicated (the shared
-    baseline point across the qu-grid and oltc-grid is only listed once).
-    """
     scenarios = []
     seen = set()
 
@@ -96,12 +92,6 @@ def run_one_scenario(sc: dict, start_hour: float, end_hour: float, seed: int = 4
 
     sim_days = results["sim_hours"] / 24.0
     taps_per_day = results["total_tap_ops"] / sim_days if sim_days > 0 else float("nan")
-
-    # Best-effort: report up to 3 individual RegControl tap counts by name.
-    # Feeders have different numbers/names of RegControls (IEEE13: 3,
-    # IEEE34/123: 6-7), so this is NOT a complete per-regulator breakdown --
-    # it's a quick top-3 for spot-checking, not a substitute for reading
-    # tap_ops_per_regcontrol from the full log if you need all of them.
     per_reg = results["tap_ops_per_regcontrol"]
     per_reg_sorted = sorted(per_reg.items(), key=lambda kv: -kv[1])
     reg_vals = [v for _, v in per_reg_sorted[:3]] + [None] * max(0, 3 - len(per_reg_sorted))
@@ -118,6 +108,7 @@ def run_one_scenario(sc: dict, start_hour: float, end_hour: float, seed: int = 4
         "warmup_tap_ops": results["warmup_tap_ops"],
         "taps_per_day": taps_per_day,
         "curtailment_mvarh": results["curtailment_mvarh"],
+        "voltage_ripple_pu": results["voltage_ripple_pu"],
         "sim_hours": results["sim_hours"],
         "tap_ops_reg1": reg_vals[0], "tap_ops_reg2": reg_vals[1], "tap_ops_reg3": reg_vals[2],
         "wall_seconds": wall_seconds,
@@ -126,28 +117,35 @@ def run_one_scenario(sc: dict, start_hour: float, end_hour: float, seed: int = 4
 
 
 def pick_tuned_config(df: pd.DataFrame, feeder: str) -> dict:
-    """
-    Selects the "tuned" Q(U) config for Table 1: minimum taps/day among the
-    Q(U) grid runs for this feeder (OLTC held at baseline). Ties broken by
-    lower curtailment. ADJUST THIS if your paper's definition of "tuned"
-    should weight curtailment more heavily (e.g. minimize taps/day subject
-    to curtailment below some cap) -- as written this purely minimizes taps.
-    """
-    baseline = config.BASELINE
-    sub = df[
-        (df["feeder"] == feeder)
-        & (df["oltc_deadband_pct"] == baseline["oltc_ldc_deadband_pct"])
-        & (df["oltc_delay_s"] == baseline["oltc_delay_s"])
-    ]
+    sub = df[df["feeder"] == feeder]
     if sub.empty:
         return {}
     sub = sub.sort_values(["taps_per_day", "curtailment_mvarh"])
     best = sub.iloc[0]
+
+    baseline = config.BASELINE
+    is_qu_tuned = (best["oltc_deadband_pct"] == baseline["oltc_ldc_deadband_pct"]
+                   and best["oltc_delay_s"] == baseline["oltc_delay_s"])
+    is_oltc_tuned = (best["qu_deadband_pct"] == baseline["qu_deadband_pct"]
+                     and best["qu_response_tau_s"] == baseline["qu_response_tau_s"])
+    if is_qu_tuned and not is_oltc_tuned:
+        lever = "Q(U)-only"
+    elif is_oltc_tuned and not is_qu_tuned:
+        lever = "OLTC-only"
+    elif is_qu_tuned and is_oltc_tuned:
+        lever = "baseline (no tuning beat it)"
+    else:
+        lever = "both Q(U)+OLTC jointly tuned"
+
     return {
         "qu_deadband_pct": best["qu_deadband_pct"],
         "qu_response_tau_s": best["qu_response_tau_s"],
+        "oltc_deadband_pct": best["oltc_deadband_pct"],
+        "oltc_delay_s": best["oltc_delay_s"],
         "taps_per_day": best["taps_per_day"],
         "curtailment_mvarh": best["curtailment_mvarh"],
+        "voltage_ripple_pu": best.get("voltage_ripple_pu", float("nan")),
+        "lever": lever,
     }
 
 
@@ -211,15 +209,17 @@ def main():
 
     if os.path.exists(RESULTS_CSV):
         df = pd.read_csv(RESULTS_CSV)
-        print("\n=== Tuned config per feeder (min taps/day within Q(U) grid) ===")
+        print("\n=== Tuned config per feeder (global min taps/day, Q(U) + OLTC grids) ===")
         for feeder in args.feeders:
             tuned = pick_tuned_config(df, feeder)
             if tuned:
-                print(f"  {feeder}: db={tuned['qu_deadband_pct']}% tau={tuned['qu_response_tau_s']}s "
+                print(f"  {feeder}: qu_db={tuned['qu_deadband_pct']}% qu_tau={tuned['qu_response_tau_s']}s "
+                      f"oltc_db={tuned['oltc_deadband_pct']}% oltc_delay={tuned['oltc_delay_s']}s "
                       f"-> {tuned['taps_per_day']:.1f} taps/day, "
-                      f"{tuned['curtailment_mvarh']:.4f} Mvar-h curtailment")
+                      f"{tuned['curtailment_mvarh']:.4f} Mvar-h curtailment "
+                      f"[lever: {tuned['lever']}]")
             else:
-                print(f"  {feeder}: no Q(U) grid data found yet")
+                print(f"  {feeder}: no data found yet")
 
 
 if __name__ == "__main__":
