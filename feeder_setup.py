@@ -1,6 +1,5 @@
 import random
 import opendssdirect as dss
-
 import config
 
 
@@ -88,9 +87,6 @@ def configure_invcontrol(pv_names, deadband_pct: float, response_tau_s: float,
     )
 
     pv_list_str = " ".join(pv_names)
-    # LPFTau in seconds; RateOfChangeMode=LPF makes InvControl low-pass filter
-    # the measured voltage before evaluating the curve, i.e. the "response
-    # time constant" of the paper's Table (Q(U) response time).
     dss.Text.Command(
         f"New InvControl.invctrl_qu mode=VOLTVAR voltage_curvex_ref=rated "
         f"vvc_curve1={curve_name} DeltaQ_Factor=0.7 "
@@ -102,13 +98,6 @@ def configure_invcontrol(pv_names, deadband_pct: float, response_tau_s: float,
 
 
 def configure_regcontrol(deadband_pct: float, delay_s: float):
-    """
-    Sets band (in volts, on 120-base per OpenDSS convention: band is in the
-    same 120V-base units as vreg) and delay (seconds) on ALL RegControls in
-    the compiled feeder. Assumes vreg stays at the feeder's original value
-    (we only touch band/delay, matching Sec 2.3's framing that OLTC-side
-    params are held baseline unless explicitly being swept).
-    """
     band_120base = deadband_pct / 100.0 * 120.0
 
     name = dss.RegControls.First()
@@ -137,14 +126,36 @@ def configure_capcontrol(delay_s: float = 30.0, deadtime_s: float = 300.0):
     return touched
 
 
+def enable_time_varying_load(shape_name: str = "residential_daily_shape"):
+    hourly_mult = [
+        0.42, 0.40, 0.38, 0.38, 0.40, 0.45,   # 0-5h: overnight low
+        0.55, 0.68, 0.75, 0.72, 0.68, 0.65,   # 6-11h: morning ramp, settling
+        0.63, 0.62, 0.63, 0.66, 0.70, 0.80,   # 12-17h: midday plateau, afternoon rise
+        0.95, 1.00, 0.92, 0.78, 0.60, 0.48,   # 18-23h: evening peak, decline
+    ]
+    mult_str = " ".join(f"{v:.3f}" for v in hourly_mult)
+    dss.Text.Command(
+        f"New Loadshape.{shape_name} npts=24 interval=1 useactual=no mult=({mult_str})"
+    )
+
+    load = dss.Loads.First()
+    touched = 0
+    while load:
+        load_name = dss.Loads.Name()
+        dss.Text.Command(f"Edit Load.{load_name} daily={shape_name}")
+        touched += 1
+        load = dss.Loads.Next()
+
+    dss.Text.Command("Solve")
+    return touched
+
+
 def setup_full_scenario(feeder_key: str, qu_deadband_pct: float, qu_response_tau_s: float,
-                         oltc_deadband_pct: float, oltc_delay_s: float, seed: int = 42):
-    """
-    Convenience wrapper: loads feeder, adds PV fleet, wires Q(U) droop and
-    OLTC/cap settings for ONE full scenario. Returns dict of context needed
-    by cosim_engine (e.g. pv_names, regcontrol_names).
-    """
+                         oltc_deadband_pct: float, oltc_delay_s: float, seed: int = 42,
+                         enable_load_shape: bool = False):
     load_feeder(feeder_key)
+    if enable_load_shape:
+        enable_time_varying_load()
     pv_names = add_pv_fleet(seed=seed)
     configure_invcontrol(pv_names, qu_deadband_pct, qu_response_tau_s)
     reg_names = configure_regcontrol(oltc_deadband_pct, oltc_delay_s)
