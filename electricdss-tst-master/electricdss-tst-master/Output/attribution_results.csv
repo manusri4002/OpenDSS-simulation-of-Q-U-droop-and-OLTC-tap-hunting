@@ -1,0 +1,4 @@
+feeder,total_taps_per_day,load_driven_taps_per_day,smooth_pv_driven_taps_per_day,cloud_transient_driven_taps_per_day,qu_deadband_pct,qu_response_tau_s,oltc_deadband_pct,oltc_delay_s
+ieee13,26.62259447043334,0.0,4.8404717218969715,21.78212274853637,0.0,1.0,1.0,45.0
+ieee34,1193.1762794476033,0.0,50.824953079918195,1142.351326367685,0.0,1.0,1.0,45.0
+ieee123,847.08255133197,0.0,45.98448135802123,801.0980699739488,0.0,1.0,1.0,45.0
